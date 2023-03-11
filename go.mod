@@ -1,6 +1,6 @@
 module github.com/rozen03/FunXFile
 
-go 1.20
+go 1.19
 
 require golang.org/x/tools v0.7.0
 
