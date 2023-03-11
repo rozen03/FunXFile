@@ -3,58 +3,67 @@ package analyzer
 import (
 	"fmt"
 	"go/ast"
-	"path/filepath"
+	"reflect"
+	"strings"
 
 	"golang.org/x/tools/go/analysis"
 	"golang.org/x/tools/go/analysis/passes/inspect"
 )
 
 var Analyzer = &analysis.Analyzer{
-	Name: "Fun_x_File",
-	Doc:  "Check that every package has a file for every public function.",
-	Run:  run,
+	Name:       "fin_x_file",
+	Doc:        "Check that every package has a file for every public function.",
+	Run:        run,
+	ResultType: reflect.TypeOf(""),
 	Requires: []*analysis.Analyzer{
 		inspect.Analyzer,
 	},
 }
 
 func run(pass *analysis.Pass) (interface{}, error) {
-	filenames := make(map[string]bool)
-	functionVisitor := &functionVisitor{pass: pass, filenames: filenames}
-	ast.Walk(functionVisitor, pass.Files[0])
+	fileDecls := make(map[string][]*ast.FuncDecl) // map of filename to []*ast.FuncDecl
+	functionVisitor := &functionVisitor{pass: pass, fileDecls: fileDecls}
 
-	var suggestions []analysis.SuggestedFix
+	// Retrieve all public function declarations from the package's files and store them in a map
 	for _, file := range pass.Files {
-		filename := pass.Fset.File(file.Pos()).Name()
-		if _, ok := filenames[filename]; ok {
-			suggestion := analysis.SuggestedFix{
-				Message: fmt.Sprintf("Create file %s to add function", getFileName(filename, pass.Pkg.Name())),
-				TextEdits: []analysis.TextEdit{
-					{
-						Pos:     file.Pos(),
-						End:     file.Pos(),
-						NewText: []byte(fmt.Sprintf("package %s\\n\\nfunc MyFunction() {\\n}\\n\\n", pass.Pkg.Name())),
-					},
-				},
+		for _, decl := range file.Decls {
+			if f, ok := decl.(*ast.FuncDecl); ok {
+				if f.Name.IsExported() {
+					filename := pass.Fset.File(f.Pos()).Name()
+					if fileDecls[filename] == nil {
+						fileDecls[filename] = []*ast.FuncDecl{}
+					}
+					fileDecls[filename] = append(fileDecls[filename], f)
+				}
 			}
-			suggestions = append(suggestions, suggestion)
 		}
 	}
 
-	if len(suggestions) > 0 {
-		pass.Report(analysis.Diagnostic{
-			Pos:            pass.Files[0].Pos(),
-			Message:        "Package is missing file for function",
-			SuggestedFixes: suggestions,
-		})
+	ast.Walk(functionVisitor, pass.Files[0])
+
+	var possibleFileNames []string
+	for _, funcs := range fileDecls {
+		for _, f := range funcs {
+			if f == nil {
+				continue
+			}
+
+			possibleFileNames = append(possibleFileNames, fmt.Sprintf("%s.go", f.Name.Name))
+		}
 	}
 
-	return nil, nil
+	// Write a list of possible file names to the document
+	output := "Possible file names:\\\\\\\\n"
+	for _, name := range possibleFileNames {
+		output += fmt.Sprintf("- %s\\\\\\\\n", name)
+	}
+
+	return output, nil
 }
 
 type functionVisitor struct {
 	pass      *analysis.Pass
-	filenames map[string]bool
+	fileDecls map[string][]*ast.FuncDecl // map of filename to []*ast.FuncDecl
 }
 
 func (v *functionVisitor) Visit(node ast.Node) ast.Visitor {
@@ -65,20 +74,37 @@ func (v *functionVisitor) Visit(node ast.Node) ast.Visitor {
 		}
 
 		filename := v.pass.Fset.File(node.Pos()).Name()
-		if _, ok := v.filenames[filename]; !ok {
-			v.filenames[filename] = true
-		} else {
-			v.filenames[filename] = false
+		funcNames := v.getFuncNames(filename)
+		if len(funcNames) > 1 {
+			v.reportError(filename, nil, funcNames)
 		}
 	}
 
 	return v
 }
 
-func getFileName(filename, packageName string) string {
-	return filepath.Join(filepath.Dir(filename), packageName+".go")
+func (v *functionVisitor) getFuncNames(filename string) []string {
+	var funcNames []string
+
+	for _, decl := range v.fileDecls[filename] {
+		if decl.Name.IsExported() {
+			funcNames = append(funcNames, decl.Name.Name)
+		}
+	}
+
+	return funcNames
 }
 
-func (v *functionVisitor) Vosot(node ast.Node) ast.Visitor {
-	return v
+func (v *functionVisitor) reportError(filename string, suggestion *analysis.SuggestedFix, funcNames []string) {
+	suggestions := []analysis.SuggestedFix{}
+	if suggestion != nil {
+		suggestions = append(suggestions, *suggestion)
+	}
+
+	message := fmt.Sprintf("Package %s has more than one public function in file %s. Public functions in this file: %s", v.pass.Pkg.Name(), filename, strings.Join(funcNames, ", "))
+	v.pass.Report(analysis.Diagnostic{
+		Pos:            v.pass.Files[0].Pos(),
+		Message:        message,
+		SuggestedFixes: suggestions,
+	})
 }
