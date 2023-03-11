@@ -9,18 +9,6 @@ import (
 	"golang.org/x/tools/go/analysis/passes/inspect"
 )
 
-func GetAnalyzer() *analysis.Analyzer {
-	return &analysis.Analyzer{
-		Name:       "fin_x_file",
-		Doc:        "Check that every package has a file for every public function.",
-		Run:        run,
-		ResultType: reflect.TypeOf(""),
-		Requires: []*analysis.Analyzer{
-			inspect.Analyzer,
-		},
-	}
-}
-
 var Analyzer = &analysis.Analyzer{
 	Name:       "fin_x_file",
 	Doc:        "Check that every package has a file for every public function.",
