@@ -6,5 +6,5 @@ import (
 )
 
 func main() {
-	singlechecker.Main(analyzer.Analyzer)
+	singlechecker.Main(analyzer.GetAnalyzer())
 }
